@@ -21,6 +21,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+st.title("📈 Welcome to the Professional Intraday Trading Assistant")
+
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
