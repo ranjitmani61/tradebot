@@ -15,14 +15,11 @@ warnings.filterwarnings('ignore')
 
 # Configure Streamlit page first
 st.set_page_config(
-    page_title="Minimal Test App",
-    page_icon="✅",
+    page_title="Professional Intraday Trading Assistant",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-st.title("🎉 App is running!")
-st.success("If you see this, the issue is in your original code logic.")
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
