@@ -173,6 +173,44 @@ class DataFetcher:
             print(f"Error getting live price for {symbol}: {str(e)}")
             return 0.0
     
+    def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Get historical data for backtesting with better error handling"""
+        try:
+            if not symbol.endswith('.NS') and not symbol.endswith('.BO'):
+                symbol = f"{symbol}.NS"
+            
+            ticker = yf.Ticker(symbol)
+            
+            # Convert string dates to datetime if needed
+            if isinstance(start_date, str):
+                start_date = pd.to_datetime(start_date).date()
+            if isinstance(end_date, str):
+                end_date = pd.to_datetime(end_date).date()
+            
+            data = ticker.history(start=start_date, end=end_date)
+            
+            if data.empty:
+                print(f"No historical data available for {symbol}")
+                return pd.DataFrame()
+            
+            # Clean and validate data
+            data = data.dropna()
+            
+            # Ensure numeric columns
+            numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in numeric_columns:
+                if col in data.columns:
+                    data[col] = pd.to_numeric(data[col], errors='coerce')
+            
+            data = data.dropna()
+            data.reset_index(inplace=True)
+            
+            return data
+            
+        except Exception as e:
+            print(f"Error fetching historical data for {symbol}: {str(e)}")
+            return pd.DataFrame()
+    
     def get_market_movers(self, limit: int = 20) -> Dict[str, List[Dict]]:
         """Get top gainers and losers with improved error handling"""
         try:
@@ -220,169 +258,6 @@ class DataFetcher:
             print(f"Error getting market movers: {str(e)}")
             return {'gainers': [], 'losers': []}
     
-    def get_volume_leaders(self, limit: int = 10) -> List[Dict]:
-        """Get stocks with highest volume"""
-        try:
-            from config import NIFTY_50_STOCKS
-            
-            volume_data = []
-            
-            # Get data for stocks
-            data_dict = self.get_multiple_stocks_data(NIFTY_50_STOCKS[:limit], period='1d', interval='5m')
-            
-            for symbol, data in data_dict.items():
-                try:
-                    if not data.empty and len(data) >= 20:
-                        current_volume = data['Volume'].sum()
-                        avg_volume = data['Volume'].mean() * len(data)
-                        volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
-                        
-                        volume_data.append({
-                            'symbol': symbol,
-                            'volume': current_volume,
-                            'volume_ratio': volume_ratio,
-                            'price': data['Close'].iloc[-1]
-                        })
-                        
-                except Exception as e:
-                    print(f"Error processing volume for {symbol}: {str(e)}")
-                    continue
-            
-            # Sort by volume ratio
-            volume_data.sort(key=lambda x: x['volume_ratio'], reverse=True)
-            
-            return volume_data[:limit]
-            
-        except Exception as e:
-            print(f"Error getting volume leaders: {str(e)}")
-            return []
-    
-    def validate_symbol(self, symbol: str) -> bool:
-        """Validate if symbol exists and has data"""
-        try:
-            data = self.get_stock_data(symbol, period='1d', interval='5m')
-            return not data.empty
-            
-        except Exception:
-            return False
-    
-    def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """Get historical data for backtesting with better error handling"""
-        try:
-            if not symbol.endswith('.NS') and not symbol.endswith('.BO'):
-                symbol = f"{symbol}.NS"
-            
-            ticker = yf.Ticker(symbol)
-            
-            # Convert string dates to datetime if needed
-            if isinstance(start_date, str):
-                start_date = pd.to_datetime(start_date).date()
-            if isinstance(end_date, str):
-                end_date = pd.to_datetime(end_date).date()
-            
-            data = ticker.history(start=start_date, end=end_date)
-            
-            if data.empty:
-                print(f"No historical data available for {symbol}")
-                return pd.DataFrame()
-            
-            # Clean and validate data
-            data = data.dropna()
-            
-            # Ensure numeric columns
-            numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in numeric_columns:
-                if col in data.columns:
-                    data[col] = pd.to_numeric(data[col], errors='coerce')
-            
-            data = data.dropna()
-            data.reset_index(inplace=True)
-            
-            return data
-            
-        except Exception as e:
-            print(f"Error fetching historical data for {symbol}: {str(e)}")
-            return pd.DataFrame()
-    
-    def get_sector_performance(self) -> Dict[str, float]:
-        """Get sector-wise performance"""
-        try:
-            from config import SECTORS
-            
-            sector_performance = {}
-            
-            for sector, stocks in SECTORS.items():
-                sector_change = []
-                
-                # Get data for sector stocks
-                data_dict = self.get_multiple_stocks_data(stocks[:3], period='1d', interval='5m')
-                
-                for symbol, data in data_dict.items():
-                    try:
-                        if len(data) >= 2:
-                            current_price = data['Close'].iloc[-1]
-                            prev_price = data['Close'].iloc[-2]
-                            change_pct = ((current_price - prev_price) / prev_price) * 100
-                            sector_change.append(change_pct)
-                    except Exception:
-                        continue
-                
-                if sector_change:
-                    sector_performance[sector] = np.mean(sector_change)
-                else:
-                    sector_performance[sector] = 0.0
-            
-            return sector_performance
-            
-        except Exception as e:
-            print(f"Error getting sector performance: {str(e)}")
-            return {}
-    
-    def get_market_indices(self) -> Dict[str, Dict[str, float]]:
-        """Get major market indices data"""
-        try:
-            indices = {
-                'NIFTY': '^NSEI',
-                'SENSEX': '^BSESN',
-                'BANKNIFTY': '^NSEBANK'
-            }
-            
-            indices_data = {}
-            
-            for name, symbol in indices.items():
-                try:
-                    ticker = yf.Ticker(symbol)
-                    data = ticker.history(period='1d', interval='5m')
-                    
-                    if not data.empty and len(data) >= 2:
-                        current_price = data['Close'].iloc[-1]
-                        prev_close = data['Close'].iloc[0]
-                        change = current_price - prev_close
-                        change_pct = (change / prev_close) * 100 if prev_close > 0 else 0
-                        
-                        indices_data[name] = {
-                            'price': float(current_price),
-                            'change': float(change),
-                            'change_pct': float(change_pct),
-                            'volume': float(data['Volume'].iloc[-1]) if 'Volume' in data.columns else 0
-                        }
-                except Exception as e:
-                    print(f"Error fetching index {name}: {str(e)}")
-                    # Provide default values
-                    indices_data[name] = {
-                        'price': 0.0,
-                        'change': 0.0,
-                        'change_pct': 0.0,
-                        'volume': 0
-                    }
-                    continue
-            
-            return indices_data
-            
-        except Exception as e:
-            print(f"Error getting market indices: {str(e)}")
-            return {}
-    
     def check_market_hours(self) -> bool:
         """Check if market is currently open"""
         try:
@@ -401,34 +276,11 @@ class DataFetcher:
         except Exception:
             return False
     
-    def get_data_quality_score(self, data: pd.DataFrame) -> float:
-        """Calculate data quality score (0-100)"""
+    def validate_symbol(self, symbol: str) -> bool:
+        """Validate if symbol exists and has data"""
         try:
-            if data.empty:
-                return 0.0
-            
-            score = 100.0
-            
-            # Check for missing values
-            missing_ratio = data.isnull().sum().sum() / (len(data) * len(data.columns))
-            score -= missing_ratio * 30  # Penalty for missing data
-            
-            # Check data length
-            if len(data) < 10:
-                score -= 20  # Penalty for insufficient data
-            
-            # Check for zero volumes
-            if 'Volume' in data.columns:
-                zero_volume_ratio = (data['Volume'] == 0).sum() / len(data)
-                score -= zero_volume_ratio * 20
-            
-            # Check for price anomalies
-            if 'Close' in data.columns:
-                price_changes = data['Close'].pct_change().abs()
-                extreme_changes = (price_changes > 0.2).sum()  # >20% changes
-                score -= (extreme_changes / len(data)) * 10
-            
-            return max(0.0, min(100.0, score))
+            data = self.get_stock_data(symbol, period='1d', interval='5m')
+            return not data.empty
             
         except Exception:
-            return 0.0
+            return False
