@@ -12,6 +12,97 @@ class AISignalGenerator:
     def __init__(self):
         self.model = None
         self.is_trained = False
+    
+    def _calculate_all_indicators(self, tech_indicators, data: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate all technical indicators needed for signal generation"""
+        try:
+            indicators = {}
+            
+            # Validate required columns
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in data.columns for col in required_cols):
+                return {}
+            
+            # Current values
+            current_price = float(data['Close'].iloc[-1])
+            current_volume = int(data['Volume'].iloc[-1])
+            
+            # Price change percentage
+            if len(data) >= 2:
+                prev_price = float(data['Close'].iloc[-2])
+                price_change = ((current_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0
+            else:
+                price_change = 0
+            
+            # RSI
+            rsi_series = tech_indicators.calculate_rsi(data)
+            rsi = float(rsi_series.iloc[-1]) if not rsi_series.empty else 50.0
+            
+            # MACD
+            macd_data = tech_indicators.calculate_macd(data)
+            macd = float(macd_data['macd'].iloc[-1]) if not macd_data['macd'].empty else 0.0
+            macd_signal = float(macd_data['macd_signal'].iloc[-1]) if not macd_data['macd_signal'].empty else 0.0
+            macd_histogram = float(macd_data['macd_histogram'].iloc[-1]) if not macd_data['macd_histogram'].empty else 0.0
+            
+            # Moving averages
+            sma_20 = tech_indicators.calculate_sma(data, 20)
+            sma_20_val = float(sma_20.iloc[-1]) if not sma_20.empty else 0.0
+            
+            sma_5 = tech_indicators.calculate_sma(data, 5)
+            sma_5_val = float(sma_5.iloc[-1]) if not sma_5.empty else 0.0
+            
+            ema_12 = tech_indicators.calculate_ema(data, 12)
+            ema_12_val = float(ema_12.iloc[-1]) if not ema_12.empty else 0.0
+            
+            # Bollinger Bands
+            bb_data = tech_indicators.calculate_bollinger_bands(data)
+            bb_upper = float(bb_data['bb_upper'].iloc[-1]) if not bb_data['bb_upper'].empty else 0.0
+            bb_lower = float(bb_data['bb_lower'].iloc[-1]) if not bb_data['bb_lower'].empty else 0.0
+            bb_middle = float(bb_data['bb_middle'].iloc[-1]) if not bb_data['bb_middle'].empty else 0.0
+            
+            # Volume ratio (current vs 20-day average)
+            volume_sma = tech_indicators.calculate_volume_sma(data, 20)
+            avg_volume = float(volume_sma.iloc[-1]) if not volume_sma.empty else current_volume
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            
+            # ATR
+            atr_series = tech_indicators.calculate_atr(data)
+            atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+            
+            # Support and resistance (simplified using recent high/low)
+            if len(data) >= 20:
+                recent_data = data.tail(20)
+                support = float(recent_data['Low'].min())
+                resistance = float(recent_data['High'].max())
+            else:
+                support = float(data['Low'].min()) if len(data) > 0 else 0.0
+                resistance = float(data['High'].max()) if len(data) > 0 else 0.0
+            
+            indicators = {
+                'current_price': current_price,
+                'current_volume': current_volume,
+                'price_change': price_change,
+                'rsi': rsi,
+                'macd': macd,
+                'macd_signal': macd_signal,
+                'macd_histogram': macd_histogram,
+                'sma_20': sma_20_val,
+                'sma_5': sma_5_val,
+                'ema_12': ema_12_val,
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
+                'bb_middle': bb_middle,
+                'volume_ratio': volume_ratio,
+                'atr': atr,
+                'support': support,
+                'resistance': resistance
+            }
+            
+            return indicators
+            
+        except Exception as e:
+            print(f"Error calculating indicators: {str(e)}")
+            return {}
         
     def generate_signal(self, data: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """Generate trading signal using enhanced rule-based approach"""
@@ -23,7 +114,7 @@ class AISignalGenerator:
                 return self._get_default_signal(symbol)
             
             # Calculate technical indicators
-            indicators = tech_indicators.calculate_all_indicators(data)
+            indicators = self._calculate_all_indicators(tech_indicators, data)
             
             if not indicators:
                 return self._get_default_signal(symbol)
