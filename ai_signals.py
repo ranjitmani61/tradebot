@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-class IntradayAISignals:
+class AISignalGenerator:
     def __init__(self):
         self.model = None
         self.is_trained = False
