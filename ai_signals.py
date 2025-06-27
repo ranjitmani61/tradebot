@@ -1,468 +1,320 @@
 """
-AI-powered signal generation module with enhanced rule-based approach
+Real-time intraday AI trading signals with specific buy/sell price recommendations
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-class AISignalGenerator:
+class IntradayAISignals:
     def __init__(self):
         self.model = None
         self.is_trained = False
-    
-    def _calculate_all_indicators(self, tech_indicators, data: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate all technical indicators needed for signal generation"""
-        try:
-            indicators = {}
-            
-            # Validate required columns
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            if not all(col in data.columns for col in required_cols):
-                return {}
-            
-            # Current values
-            current_price = float(data['Close'].iloc[-1])
-            current_volume = int(data['Volume'].iloc[-1])
-            
-            # Price change percentage
-            if len(data) >= 2:
-                prev_price = float(data['Close'].iloc[-2])
-                price_change = ((current_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0
-            else:
-                price_change = 0
-            
-            # RSI
-            rsi_series = tech_indicators.calculate_rsi(data)
-            rsi = float(rsi_series.iloc[-1]) if not rsi_series.empty else 50.0
-            
-            # MACD
-            macd_data = tech_indicators.calculate_macd(data)
-            macd = float(macd_data['macd'].iloc[-1]) if not macd_data['macd'].empty else 0.0
-            macd_signal = float(macd_data['macd_signal'].iloc[-1]) if not macd_data['macd_signal'].empty else 0.0
-            macd_histogram = float(macd_data['macd_histogram'].iloc[-1]) if not macd_data['macd_histogram'].empty else 0.0
-            
-            # Moving averages
-            sma_20 = tech_indicators.calculate_sma(data, 20)
-            sma_20_val = float(sma_20.iloc[-1]) if not sma_20.empty else 0.0
-            
-            sma_5 = tech_indicators.calculate_sma(data, 5)
-            sma_5_val = float(sma_5.iloc[-1]) if not sma_5.empty else 0.0
-            
-            ema_12 = tech_indicators.calculate_ema(data, 12)
-            ema_12_val = float(ema_12.iloc[-1]) if not ema_12.empty else 0.0
-            
-            # Bollinger Bands
-            bb_data = tech_indicators.calculate_bollinger_bands(data)
-            bb_upper = float(bb_data['bb_upper'].iloc[-1]) if not bb_data['bb_upper'].empty else 0.0
-            bb_lower = float(bb_data['bb_lower'].iloc[-1]) if not bb_data['bb_lower'].empty else 0.0
-            bb_middle = float(bb_data['bb_middle'].iloc[-1]) if not bb_data['bb_middle'].empty else 0.0
-            
-            # Volume ratio (current vs 20-day average)
-            volume_sma = tech_indicators.calculate_volume_sma(data, 20)
-            avg_volume = float(volume_sma.iloc[-1]) if not volume_sma.empty else current_volume
-            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
-            
-            # ATR
-            atr_series = tech_indicators.calculate_atr(data)
-            atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
-            
-            # Support and resistance (simplified using recent high/low)
-            if len(data) >= 20:
-                recent_data = data.tail(20)
-                support = float(recent_data['Low'].min())
-                resistance = float(recent_data['High'].max())
-            else:
-                support = float(data['Low'].min()) if len(data) > 0 else 0.0
-                resistance = float(data['High'].max()) if len(data) > 0 else 0.0
-            
-            indicators = {
-                'current_price': current_price,
-                'current_volume': current_volume,
-                'price_change': price_change,
-                'rsi': rsi,
-                'macd': macd,
-                'macd_signal': macd_signal,
-                'macd_histogram': macd_histogram,
-                'sma_20': sma_20_val,
-                'sma_5': sma_5_val,
-                'ema_12': ema_12_val,
-                'bb_upper': bb_upper,
-                'bb_lower': bb_lower,
-                'bb_middle': bb_middle,
-                'volume_ratio': volume_ratio,
-                'atr': atr,
-                'support': support,
-                'resistance': resistance
-            }
-            
-            return indicators
-            
-        except Exception as e:
-            print(f"Error calculating indicators: {str(e)}")
-            return {}
+        self.price_targets = {}
+        self.active_alerts = {}
         
-    def generate_signal(self, data: pd.DataFrame, symbol: str) -> Dict[str, Any]:
-        """Generate trading signal using enhanced rule-based approach"""
+    def analyze_realtime_movement(self, data: pd.DataFrame, symbol: str, 
+                                 current_price: float, seconds_lookback: int = 30) -> Dict[str, Any]:
+        """
+        Analyze second-by-second price movements and generate buy/sell price alerts
+        """
         try:
             from technical_indicators import TechnicalIndicators
             tech_indicators = TechnicalIndicators()
             
-            if data.empty or len(data) < 20:
-                return self._get_default_signal(symbol)
+            if data.empty or len(data) < seconds_lookback:
+                return self._get_default_alert(symbol, current_price)
             
-            # Calculate technical indicators
-            indicators = self._calculate_all_indicators(tech_indicators, data)
+            # Get recent price movements (last X seconds)
+            recent_data = data.tail(seconds_lookback)
             
-            if not indicators:
-                return self._get_default_signal(symbol)
+            # Calculate price momentum
+            price_change = self._calculate_price_momentum(recent_data)
+            volatility = self._calculate_short_term_volatility(recent_data)
             
-            # Enhanced rule-based signal generation
-            signal_score = 0
-            confidence_factors = []
+            # Calculate technical indicators for context
+            indicators = self._calculate_quick_indicators(tech_indicators, data)
             
-            # RSI signals (weighted heavily)
-            rsi = indicators.get('rsi', 50)
-            if rsi < 25:  # Very oversold
-                signal_score += 3
-                confidence_factors.append(f"RSI very oversold ({rsi:.1f})")
-            elif rsi < 30:  # Oversold
-                signal_score += 2
-                confidence_factors.append(f"RSI oversold ({rsi:.1f})")
-            elif rsi > 75:  # Very overbought
-                signal_score -= 3
-                confidence_factors.append(f"RSI very overbought ({rsi:.1f})")
-            elif rsi > 70:  # Overbought
-                signal_score -= 2
-                confidence_factors.append(f"RSI overbought ({rsi:.1f})")
-            elif 45 <= rsi <= 55:  # Neutral zone
-                signal_score += 0.5
+            # Generate specific buy/sell price recommendations
+            signal_data = self._generate_intraday_signal(
+                symbol, current_price, price_change, volatility, indicators, recent_data
+            )
             
-            # MACD signals
-            macd = indicators.get('macd', 0)
-            macd_signal = indicators.get('macd_signal', 0)
-            macd_histogram = indicators.get('macd_histogram', 0)
+            return signal_data
             
-            if macd > macd_signal and macd_histogram > 0:  # Bullish crossover
-                signal_score += 1.5
-                confidence_factors.append("MACD bullish crossover")
-            elif macd < macd_signal and macd_histogram < 0:  # Bearish crossover
-                signal_score -= 1.5
-                confidence_factors.append("MACD bearish crossover")
+        except Exception as e:
+            print(f"Error analyzing {symbol}: {str(e)}")
+            return self._get_default_alert(symbol, current_price)
+    
+    def _calculate_price_momentum(self, recent_data: pd.DataFrame) -> Dict[str, float]:
+        """Calculate price momentum over recent seconds"""
+        try:
+            if len(recent_data) < 2:
+                return {'direction': 0, 'strength': 0, 'acceleration': 0}
             
-            # Moving Average signals
-            current_price = indicators.get('current_price', 0)
-            sma_20 = indicators.get('sma_20', 0)
-            sma_5 = indicators.get('sma_5', 0)
-            ema_12 = indicators.get('ema_12', 0)
+            prices = recent_data['Close'].values
             
-            if current_price > sma_20 and sma_20 > 0:  # Above SMA 20
-                signal_score += 1
-                confidence_factors.append("Price above SMA 20")
-                
-                if sma_5 > sma_20:  # Short MA above long MA
-                    signal_score += 0.5
-                    confidence_factors.append("Golden cross pattern")
-                    
-            elif current_price < sma_20 and sma_20 > 0:  # Below SMA 20
-                signal_score -= 1
-                confidence_factors.append("Price below SMA 20")
-                
-                if sma_5 < sma_20:  # Death cross pattern
-                    signal_score -= 0.5
-                    confidence_factors.append("Death cross pattern")
+            # Direction: positive if trending up, negative if down
+            direction = (prices[-1] - prices[0]) / prices[0] * 100
             
-            # Bollinger Bands signals
-            bb_upper = indicators.get('bb_upper', 0)
-            bb_lower = indicators.get('bb_lower', 0)
-            bb_middle = indicators.get('bb_middle', 0)
+            # Strength: how consistent the movement is
+            price_changes = np.diff(prices)
+            consistent_moves = np.sum(np.sign(price_changes) == np.sign(direction))
+            strength = consistent_moves / len(price_changes) if len(price_changes) > 0 else 0
             
-            if bb_upper > 0 and bb_lower > 0:
-                if current_price <= bb_lower:  # At or below lower band
-                    signal_score += 2
-                    confidence_factors.append("Price at BB lower band")
-                elif current_price >= bb_upper:  # At or above upper band
-                    signal_score -= 2
-                    confidence_factors.append("Price at BB upper band")
-                elif current_price > bb_middle:  # Above middle band
-                    signal_score += 0.5
-            
-            # Volume confirmation
-            volume_ratio = indicators.get('volume_ratio', 1)
-            if volume_ratio > 2:  # Very high volume
-                signal_score *= 1.3
-                confidence_factors.append(f"Very high volume ({volume_ratio:.1f}x)")
-            elif volume_ratio > 1.5:  # High volume
-                signal_score *= 1.2
-                confidence_factors.append(f"High volume ({volume_ratio:.1f}x)")
-            elif volume_ratio < 0.5:  # Very low volume
-                signal_score *= 0.7
-                confidence_factors.append("Low volume concern")
-            
-            # Price momentum
-            price_change = indicators.get('price_change', 0)
-            if abs(price_change) > 3:  # Strong momentum
-                if price_change > 0:
-                    signal_score += 1
-                    confidence_factors.append(f"Strong upward momentum ({price_change:+.1f}%)")
-                else:
-                    signal_score -= 1
-                    confidence_factors.append(f"Strong downward momentum ({price_change:+.1f}%)")
-            elif abs(price_change) > 1.5:  # Moderate momentum
-                if price_change > 0:
-                    signal_score += 0.5
-                else:
-                    signal_score -= 0.5
-            
-            # ATR-based volatility check
-            atr = indicators.get('atr', 0)
-            if current_price > 0 and atr > 0:
-                atr_pct = (atr / current_price) * 100
-                if atr_pct > 5:  # High volatility
-                    signal_score *= 0.9  # Reduce confidence slightly
-                    confidence_factors.append("High volatility warning")
-            
-            # Support and resistance levels
-            support = indicators.get('support', 0)
-            resistance = indicators.get('resistance', 0)
-            
-            if support > 0 and current_price <= support * 1.02:  # Near support
-                signal_score += 1
-                confidence_factors.append("Near support level")
-            elif resistance > 0 and current_price >= resistance * 0.98:  # Near resistance
-                signal_score -= 1
-                confidence_factors.append("Near resistance level")
-            
-            # Determine final signal based on enhanced scoring
-            if signal_score >= 3:
-                signal = 'BUY'
-                confidence = min(90, 60 + abs(signal_score) * 8)
-            elif signal_score <= -3:
-                signal = 'SELL'
-                confidence = min(90, 60 + abs(signal_score) * 8)
-            elif signal_score >= 1.5:
-                signal = 'BUY'
-                confidence = min(75, 50 + abs(signal_score) * 10)
-            elif signal_score <= -1.5:
-                signal = 'SELL'
-                confidence = min(75, 50 + abs(signal_score) * 10)
+            # Acceleration: is the movement getting stronger?
+            if len(prices) >= 3:
+                recent_change = (prices[-1] - prices[-2]) / prices[-2] * 100
+                earlier_change = (prices[-2] - prices[-3]) / prices[-3] * 100
+                acceleration = recent_change - earlier_change
             else:
-                signal = 'HOLD'
-                confidence = 50 + abs(signal_score) * 5
-            
-            # Ensure confidence is within reasonable bounds
-            confidence = max(30, min(95, confidence))
+                acceleration = 0
             
             return {
-                'signal': signal,
-                'confidence': round(confidence, 1),
-                'price': current_price,
-                'rsi': rsi,
-                'macd': macd,
-                'volume': indicators.get('current_volume', 0),
-                'volume_ratio': volume_ratio,
-                'signal_score': signal_score,
-                'factors': confidence_factors[:5],  # Top 5 factors
-                'timestamp': pd.Timestamp.now(),
-                'symbol': symbol,
-                'atr_percentage': (atr / current_price * 100) if current_price > 0 and atr > 0 else 0
+                'direction': direction,
+                'strength': strength,
+                'acceleration': acceleration
             }
             
-        except Exception as e:
-            print(f"Error generating signal for {symbol}: {str(e)}")
-            return self._get_default_signal(symbol)
+        except Exception:
+            return {'direction': 0, 'strength': 0, 'acceleration': 0}
     
-    def _get_default_signal(self, symbol: str) -> Dict[str, Any]:
-        """Return default signal when calculation fails"""
-        return {
-            'signal': 'HOLD',
-            'confidence': 50.0,
-            'price': 0.0,
-            'rsi': 50.0,
-            'macd': 0.0,
-            'volume': 0,
-            'volume_ratio': 1.0,
-            'signal_score': 0,
-            'factors': ['Insufficient data'],
-            'timestamp': pd.Timestamp.now(),
-            'symbol': symbol,
-            'atr_percentage': 0
-        }
-    
-    def batch_generate_signals(self, data_dict: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
-        """Generate signals for multiple stocks"""
+    def _calculate_short_term_volatility(self, recent_data: pd.DataFrame) -> float:
+        """Calculate volatility over recent seconds"""
         try:
-            signals = {}
+            if len(recent_data) < 2:
+                return 0
             
-            for symbol, data in data_dict.items():
-                signals[symbol] = self.generate_signal(data, symbol)
+            price_changes = recent_data['Close'].pct_change().dropna()
+            return price_changes.std() * 100 if len(price_changes) > 0 else 0
             
-            return signals
+        except Exception:
+            return 0
+    
+    def _calculate_quick_indicators(self, tech_indicators, data: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate essential technical indicators quickly"""
+        try:
+            if len(data) < 14:
+                return {}
             
-        except Exception as e:
-            print(f"Error in batch signal generation: {str(e)}")
+            # RSI for overbought/oversold
+            rsi_series = tech_indicators.calculate_rsi(data, period=14)
+            rsi = float(rsi_series.iloc[-1]) if not rsi_series.empty else 50
+            
+            # Short-term moving averages
+            sma_5 = tech_indicators.calculate_sma(data, 5)
+            sma_5_val = float(sma_5.iloc[-1]) if not sma_5.empty else 0
+            
+            sma_10 = tech_indicators.calculate_sma(data, 10)
+            sma_10_val = float(sma_10.iloc[-1]) if not sma_10.empty else 0
+            
+            # Current price position
+            current_price = float(data['Close'].iloc[-1])
+            
+            # Support and resistance from recent data
+            recent_high = float(data['High'].tail(20).max())
+            recent_low = float(data['Low'].tail(20).min())
+            
+            return {
+                'rsi': rsi,
+                'sma_5': sma_5_val,
+                'sma_10': sma_10_val,
+                'current_price': current_price,
+                'recent_high': recent_high,
+                'recent_low': recent_low
+            }
+            
+        except Exception:
             return {}
     
-    def get_signal_strength(self, signal_data: Dict[str, Any]) -> str:
-        """Get signal strength description"""
-        try:
-            confidence = signal_data.get('confidence', 50)
-            
-            if confidence >= 85:
-                return "Very Strong"
-            elif confidence >= 75:
-                return "Strong"
-            elif confidence >= 65:
-                return "Moderate"
-            elif confidence >= 55:
-                return "Weak"
-            else:
-                return "Very Weak"
+    def _generate_intraday_signal(self, symbol: str, current_price: float, 
+                                 momentum: Dict[str, float], volatility: float,
+                                 indicators: Dict[str, Any], recent_data: pd.DataFrame) -> Dict[str, Any]:
+        """Generate specific buy/sell price recommendations for intraday trading"""
+        
+        direction = momentum.get('direction', 0)
+        strength = momentum.get('strength', 0)
+        acceleration = momentum.get('acceleration', 0)
+        
+        rsi = indicators.get('rsi', 50)
+        sma_5 = indicators.get('sma_5', current_price)
+        sma_10 = indicators.get('sma_10', current_price)
+        recent_high = indicators.get('recent_high', current_price)
+        recent_low = indicators.get('recent_low', current_price)
+        
+        # Calculate price targets based on volatility and momentum
+        volatility_buffer = max(volatility * 0.01, 0.002)  # Minimum 0.2% buffer
+        
+        alert_type = "HOLD"
+        buy_price = None
+        sell_price = None
+        confidence = 50
+        reasoning = []
+        
+        # UPWARD MOVEMENT DETECTED
+        if direction > 0.1 and strength > 0.6:  # Strong upward movement
+            if acceleration > 0:  # Accelerating upward
+                alert_type = "BUY_MOMENTUM"
+                # Buy at current price or slight pullback
+                buy_price = round(current_price * (1 - volatility_buffer), 4)
+                # Sell target: current resistance or momentum target
+                sell_price = round(current_price * (1 + volatility_buffer * 2), 4)
+                confidence = min(85, 60 + strength * 25)
+                reasoning.append(f"Strong upward momentum ({direction:+.2f}%)")
+                reasoning.append(f"Accelerating movement ({acceleration:+.3f}%)")
                 
-        except Exception:
-            return "Unknown"
+            elif rsi < 70:  # Not overbought yet
+                alert_type = "BUY_TREND"
+                buy_price = round(current_price * (1 - volatility_buffer * 0.5), 4)
+                sell_price = round(min(recent_high * 0.99, current_price * (1 + volatility_buffer * 1.5)), 4)
+                confidence = min(75, 55 + strength * 20)
+                reasoning.append(f"Upward trend ({direction:+.2f}%)")
+                reasoning.append(f"RSI not overbought ({rsi:.1f})")
+        
+        # DOWNWARD MOVEMENT DETECTED  
+        elif direction < -0.1 and strength > 0.6:  # Strong downward movement
+            if acceleration < 0:  # Accelerating downward
+                alert_type = "SELL_MOMENTUM"
+                # Sell at current price or slight bounce
+                sell_price = round(current_price * (1 + volatility_buffer), 4)
+                # Buy back target: support level or oversold bounce
+                buy_price = round(current_price * (1 - volatility_buffer * 2), 4)
+                confidence = min(85, 60 + strength * 25)
+                reasoning.append(f"Strong downward momentum ({direction:+.2f}%)")
+                reasoning.append(f"Accelerating downward ({acceleration:+.3f}%)")
+                
+            elif rsi > 30:  # Not oversold yet
+                alert_type = "SELL_TREND"
+                sell_price = round(current_price * (1 + volatility_buffer * 0.5), 4)
+                buy_price = round(max(recent_low * 1.01, current_price * (1 - volatility_buffer * 1.5)), 4)
+                confidence = min(75, 55 + strength * 20)
+                reasoning.append(f"Downward trend ({direction:+.2f}%)")
+                reasoning.append(f"RSI not oversold ({rsi:.1f})")
+        
+        # SIDEWAYS/RANGE TRADING
+        elif abs(direction) <= 0.1 and volatility > 0.5:
+            if current_price <= recent_low * 1.02:  # Near support
+                alert_type = "BUY_SUPPORT"
+                buy_price = round(current_price, 4)
+                sell_price = round(recent_high * 0.98, 4)
+                confidence = 65
+                reasoning.append("Price near support level")
+                reasoning.append("Range trading opportunity")
+                
+            elif current_price >= recent_high * 0.98:  # Near resistance
+                alert_type = "SELL_RESISTANCE"
+                sell_price = round(current_price, 4)
+                buy_price = round(recent_low * 1.02, 4)
+                confidence = 65
+                reasoning.append("Price near resistance level")
+                reasoning.append("Range trading opportunity")
+        
+        # BREAKOUT DETECTION
+        if current_price > recent_high * 1.001:  # Breaking resistance
+            alert_type = "BUY_BREAKOUT"
+            buy_price = round(current_price, 4)
+            sell_price = round(current_price * (1 + volatility_buffer * 3), 4)
+            confidence = 80
+            reasoning.append("Breaking above resistance")
+            reasoning.append("Potential breakout")
+            
+        elif current_price < recent_low * 0.999:  # Breaking support
+            alert_type = "SELL_BREAKDOWN"
+            sell_price = round(current_price, 4)
+            buy_price = round(current_price * (1 - volatility_buffer * 3), 4)
+            confidence = 80
+            reasoning.append("Breaking below support")
+            reasoning.append("Potential breakdown")
+        
+        # Calculate stop loss levels
+        stop_loss_buy = round(current_price * (1 - volatility_buffer * 2), 4) if buy_price else None
+        stop_loss_sell = round(current_price * (1 + volatility_buffer * 2), 4) if sell_price else None
+        
+        return {
+            'symbol': symbol,
+            'alert_type': alert_type,
+            'current_price': round(current_price, 4),
+            'buy_price': buy_price,
+            'sell_price': sell_price,
+            'stop_loss_buy': stop_loss_buy,
+            'stop_loss_sell': stop_loss_sell,
+            'confidence': round(confidence, 1),
+            'reasoning': reasoning[:3],  # Top 3 reasons
+            'momentum': {
+                'direction': round(direction, 3),
+                'strength': round(strength, 3),
+                'acceleration': round(acceleration, 4)
+            },
+            'volatility': round(volatility, 3),
+            'rsi': round(rsi, 1),
+            'timestamp': pd.Timestamp.now(),
+            'timeframe': 'intraday'
+        }
     
-    def validate_signal(self, signal_data: Dict[str, Any]) -> bool:
-        """Validate if signal is reliable"""
-        try:
-            confidence = signal_data.get('confidence', 0)
-            signal = signal_data.get('signal', 'HOLD')
-            
-            # Minimum confidence threshold
-            if confidence < 60 and signal != 'HOLD':
-                return False
-            
-            # Check if key indicators are available
-            required_fields = ['price', 'rsi', 'macd']
-            for field in required_fields:
-                if field not in signal_data:
-                    return False
-            
-            return True
-            
-        except Exception:
-            return False
+    def get_price_alerts(self, symbols: List[str], data_dict: Dict[str, pd.DataFrame], 
+                        seconds_lookback: int = 30) -> Dict[str, Dict[str, Any]]:
+        """Get real-time price alerts for multiple symbols"""
+        alerts = {}
+        
+        for symbol in symbols:
+            if symbol in data_dict and not data_dict[symbol].empty:
+                current_price = float(data_dict[symbol]['Close'].iloc[-1])
+                alert = self.analyze_realtime_movement(
+                    data_dict[symbol], symbol, current_price, seconds_lookback
+                )
+                alerts[symbol] = alert
+        
+        return alerts
     
-    def get_risk_assessment(self, data: pd.DataFrame, signal_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Assess risk for the generated signal"""
-        try:
-            if data.empty:
-                return {'risk_level': 'High', 'risk_score': 80, 'volatility': 0, 'atr_percentage': 0}
+    def format_trading_alert(self, alert_data: Dict[str, Any]) -> str:
+        """Format alert data into readable trading message"""
+        symbol = alert_data['symbol']
+        alert_type = alert_data['alert_type']
+        current_price = alert_data['current_price']
+        buy_price = alert_data.get('buy_price')
+        sell_price = alert_data.get('sell_price')
+        confidence = alert_data['confidence']
+        reasoning = alert_data.get('reasoning', [])
+        
+        if alert_type == "HOLD":
+            return f"📊 {symbol} @ ${current_price} - HOLD - No clear signal"
+        
+        message = f"🚨 {symbol} ALERT @ ${current_price}\n"
+        message += f"📈 Signal: {alert_type.replace('_', ' ')}\n"
+        message += f"🎯 Confidence: {confidence}%\n"
+        
+        if buy_price:
+            message += f"💰 BUY at: ${buy_price}\n"
+        if sell_price:
+            message += f"💸 SELL at: ${sell_price}\n"
             
-            # Calculate volatility
-            if len(data) >= 20:
-                returns = data['Close'].pct_change().dropna()
-                volatility = returns.std() * np.sqrt(252) * 100 if len(returns) > 0 else 0  # Annualized volatility
-            else:
-                volatility = 0
-            
-            # ATR-based risk
-            atr_pct = signal_data.get('atr_percentage', 0)
-            
-            # Risk score calculation
-            risk_score = 0
-            
-            # Volatility component (0-35 points)
-            if volatility > 50:
-                risk_score += 35
-            elif volatility > 35:
-                risk_score += 25
-            elif volatility > 20:
-                risk_score += 15
-            else:
-                risk_score += 5
-            
-            # ATR component (0-25 points)
-            if atr_pct > 6:
-                risk_score += 25
-            elif atr_pct > 4:
-                risk_score += 18
-            elif atr_pct > 2:
-                risk_score += 10
-            else:
-                risk_score += 3
-            
-            # Signal confidence component (0-25 points)
-            confidence = signal_data.get('confidence', 50)
-            confidence_risk = (100 - confidence) * 0.25
-            risk_score += confidence_risk
-            
-            # Volume component (0-15 points)
-            volume_ratio = signal_data.get('volume_ratio', 1)
-            if volume_ratio < 0.5:  # Very low volume
-                risk_score += 15
-            elif volume_ratio < 0.8:  # Low volume
-                risk_score += 10
-            elif volume_ratio > 3:  # Very high volume (can be risky)
-                risk_score += 8
-            elif volume_ratio > 2:  # High volume
-                risk_score += 3
-            
-            # Market conditions component (0-10 points)
-            rsi = signal_data.get('rsi', 50)
-            if rsi > 80 or rsi < 20:  # Extreme RSI
-                risk_score += 10
-            elif rsi > 75 or rsi < 25:  # Very high/low RSI
-                risk_score += 6
-            
-            # Determine risk level
-            if risk_score >= 75:
-                risk_level = 'High'
-            elif risk_score >= 50:
-                risk_level = 'Medium'
-            else:
-                risk_level = 'Low'
-            
-            return {
-                'risk_level': risk_level,
-                'risk_score': min(100, max(0, round(risk_score))),
-                'volatility': round(volatility, 2),
-                'atr_percentage': round(atr_pct, 2)
-            }
-            
-        except Exception as e:
-            print(f"Error in risk assessment: {str(e)}")
-            return {'risk_level': 'High', 'risk_score': 80, 'volatility': 0, 'atr_percentage': 0}
+        if alert_data.get('stop_loss_buy'):
+            message += f"🛑 Stop Loss (Buy): ${alert_data['stop_loss_buy']}\n"
+        if alert_data.get('stop_loss_sell'):
+            message += f"🛑 Stop Loss (Sell): ${alert_data['stop_loss_sell']}\n"
+        
+        if reasoning:
+            message += f"📋 Reasons: {', '.join(reasoning)}\n"
+        
+        return message
     
-    def get_signal_quality_score(self, signal_data: Dict[str, Any]) -> int:
-        """Calculate overall signal quality score (0-100)"""
-        try:
-            score = 0
-            
-            # Confidence component (40% weight)
-            confidence = signal_data.get('confidence', 50)
-            score += (confidence / 100) * 40
-            
-            # Factor count component (20% weight)
-            factors = signal_data.get('factors', [])
-            factor_score = min(len(factors) / 5, 1) * 20
-            score += factor_score
-            
-            # Volume confirmation (20% weight)
-            volume_ratio = signal_data.get('volume_ratio', 1)
-            if volume_ratio >= 1.5:
-                score += 20
-            elif volume_ratio >= 1.2:
-                score += 15
-            elif volume_ratio >= 1:
-                score += 10
-            else:
-                score += 5
-            
-            # Signal strength component (20% weight)
-            signal_score = abs(signal_data.get('signal_score', 0))
-            if signal_score >= 3:
-                score += 20
-            elif signal_score >= 2:
-                score += 15
-            elif signal_score >= 1:
-                score += 10
-            else:
-                score += 5
-            
-            return min(100, max(0, round(score)))
-            
-        except Exception:
-            return 50
+    def _get_default_alert(self, symbol: str, current_price: float) -> Dict[str, Any]:
+        """Return default alert when analysis fails"""
+        return {
+            'symbol': symbol,
+            'alert_type': 'HOLD',
+            'current_price': round(current_price, 4),
+            'buy_price': None,
+            'sell_price': None,
+            'stop_loss_buy': None,
+            'stop_loss_sell': None,
+            'confidence': 50.0,
+            'reasoning': ['Insufficient data'],
+            'momentum': {'direction': 0, 'strength': 0, 'acceleration': 0},
+            'volatility': 0,
+            'rsi': 50,
+            'timestamp': pd.Timestamp.now(),
+            'timeframe': 'intraday'
+        }
