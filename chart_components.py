@@ -22,13 +22,13 @@ class ChartComponents:
                 fig.add_annotation(text="No data available", x=0.5, y=0.5, showarrow=False)
                 return fig
             
-            # Create subplots
+            # Create subplots with proper row heights
             fig = sp.make_subplots(
                 rows=3, cols=1,
                 shared_xaxes=True,
-                vertical_spacing=0.03,
+                vertical_spacing=0.05,
                 subplot_titles=(f'{symbol} - Price Action', 'Volume', 'RSI'),
-                row_width=[0.6, 0.2, 0.2]
+                row_heights=[0.6, 0.2, 0.2]
             )
             
             # Candlestick chart
@@ -314,10 +314,67 @@ class ChartComponents:
                         )
                     )
                     
-                    fig.add_hline(y=80, line_dash="dash", line_color="red")
-                    fig.add_hline(y=20, line_dash="dash", line_color="green")
+                    # Reference lines
+                    fig.add_hline(y=80, line_dash="dash", line_color="red", annotation_text="Overbought")
+                    fig.add_hline(y=20, line_dash="dash", line_color="green", annotation_text="Oversold")
+                    fig.add_hline(y=50, line_dash="dot", line_color="gray")
                     
                     fig.update_yaxes(range=[0, 100])
+            
+            elif indicator_type == 'Williams %R':
+                williams_r = tech_indicators.calculate_williams_r(data)
+                if len(williams_r.dropna()) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                            y=williams_r,
+                            mode='lines',
+                            name='Williams %R',
+                            line=dict(color='orange', width=2)
+                        )
+                    )
+                    
+                    # Reference lines
+                    fig.add_hline(y=-20, line_dash="dash", line_color="red", annotation_text="Overbought")
+                    fig.add_hline(y=-80, line_dash="dash", line_color="green", annotation_text="Oversold")
+                    fig.add_hline(y=-50, line_dash="dot", line_color="gray")
+                    
+                    fig.update_yaxes(range=[-100, 0])
+            
+            elif indicator_type == 'CCI':
+                cci = tech_indicators.calculate_cci(data)
+                if len(cci.dropna()) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                            y=cci,
+                            mode='lines',
+                            name='CCI',
+                            line=dict(color='cyan', width=2)
+                        )
+                    )
+                    
+                    # Reference lines
+                    fig.add_hline(y=100, line_dash="dash", line_color="red", annotation_text="Overbought")
+                    fig.add_hline(y=-100, line_dash="dash", line_color="green", annotation_text="Oversold")
+                    fig.add_hline(y=0, line_dash="dot", line_color="gray")
+            
+            elif indicator_type == 'ATR':
+                atr = tech_indicators.calculate_atr(data)
+                if len(atr.dropna()) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                            y=atr,
+                            mode='lines',
+                            name='ATR',
+                            line=dict(color='brown', width=2)
+                        )
+                    )
+            
+            else:
+                fig.add_annotation(text=f"Indicator '{indicator_type}' not implemented", 
+                                 x=0.5, y=0.5, showarrow=False)
             
             fig.update_layout(
                 title=f'{symbol} - {indicator_type}',
@@ -335,38 +392,34 @@ class ChartComponents:
             return fig
     
     def create_comparison_chart(self, data_dict: Dict[str, pd.DataFrame], symbols: List[str]) -> go.Figure:
-        """Create comparison chart for multiple stocks"""
+        """Create comparison chart for multiple symbols"""
         try:
             fig = go.Figure()
             
             colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
             
-            for i, symbol in enumerate(symbols[:8]):  # Limit to 8 stocks
-                if symbol in data_dict:
+            for i, symbol in enumerate(symbols):
+                if symbol in data_dict and not data_dict[symbol].empty:
                     data = data_dict[symbol]
-                    if not data.empty:
-                        # Normalize prices to percentage change
-                        normalized_prices = (data['Close'] / data['Close'].iloc[0] - 1) * 100
-                        
-                        fig.add_trace(
-                            go.Scatter(
-                                x=data.index if 'Datetime' not in data.columns else data['Datetime'],
-                                y=normalized_prices,
-                                mode='lines',
-                                name=symbol,
-                                line=dict(color=colors[i % len(colors)], width=2)
-                            )
+                    color = colors[i % len(colors)]
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                            y=data['Close'],
+                            mode='lines',
+                            name=symbol,
+                            line=dict(color=color, width=2)
                         )
+                    )
             
             fig.update_layout(
-                title='Stock Performance Comparison',
+                title='Price Comparison',
                 xaxis_title='Date',
-                yaxis_title='Returns (%)',
+                yaxis_title='Price',
                 height=500,
                 showlegend=True
             )
-            
-            fig.add_hline(y=0, line_dash="dash", line_color="black")
             
             return fig
             
@@ -376,50 +429,49 @@ class ChartComponents:
             fig.add_annotation(text=f"Chart Error: {str(e)}", x=0.5, y=0.5, showarrow=False)
             return fig
     
-    def create_heatmap(self, data: Dict[str, float], title: str) -> go.Figure:
-        """Create heatmap for sector/stock performance"""
+    def create_price_chart(self, data: pd.DataFrame, symbol: str, chart_type: str = 'line') -> go.Figure:
+        """Create basic price chart"""
         try:
-            if not data:
+            if data.empty:
                 fig = go.Figure()
                 fig.add_annotation(text="No data available", x=0.5, y=0.5, showarrow=False)
                 return fig
             
-            symbols = list(data.keys())
-            values = list(data.values())
+            fig = go.Figure()
             
-            # Create color scale
-            colors = []
-            for value in values:
-                if value > 2:
-                    colors.append('darkgreen')
-                elif value > 0:
-                    colors.append('lightgreen')
-                elif value > -2:
-                    colors.append('lightcoral')
-                else:
-                    colors.append('darkred')
-            
-            fig = go.Figure(data=go.Bar(
-                x=symbols,
-                y=values,
-                marker_color=colors,
-                text=[f'{v:+.1f}%' for v in values],
-                textposition='auto'
-            ))
+            if chart_type == 'candlestick':
+                fig.add_trace(
+                    go.Candlestick(
+                        x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                        open=data['Open'],
+                        high=data['High'],
+                        low=data['Low'],
+                        close=data['Close'],
+                        name=symbol
+                    )
+                )
+            else:  # line chart
+                fig.add_trace(
+                    go.Scatter(
+                        x=data.index if 'Datetime' not in data.columns else data['Datetime'],
+                        y=data['Close'],
+                        mode='lines',
+                        name=symbol,
+                        line=dict(width=2)
+                    )
+                )
             
             fig.update_layout(
-                title=title,
-                xaxis_title='Symbol',
-                yaxis_title='Change (%)',
+                title=f'{symbol} - Price Chart',
+                xaxis_title='Date',
+                yaxis_title='Price',
                 height=400
             )
-            
-            fig.add_hline(y=0, line_dash="dash", line_color="black")
             
             return fig
             
         except Exception as e:
-            st.error(f"Error creating heatmap: {str(e)}")
+            st.error(f"Error creating price chart: {str(e)}")
             fig = go.Figure()
             fig.add_annotation(text=f"Chart Error: {str(e)}", x=0.5, y=0.5, showarrow=False)
             return fig
